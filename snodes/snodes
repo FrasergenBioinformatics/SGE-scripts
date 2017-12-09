@@ -1,0 +1,171 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Author: zengxiaofei
+# Email: zengxiaofei@frasergen.com
+# Created Time: 2017-12-01 08:59
+
+from __future__ import print_function
+import os
+import collections
+import re
+import argparse
+
+def qhost():
+    node_stat = collections.OrderedDict()
+    qhost_p = os.popen('qhost')
+    for n in xrange(3):
+        qhost_p.next()
+    for line in qhost_p:
+        ls = line.split()
+        if ls[0] not in {'ln01', 'mu01'}:
+            node_name, ncpu, load = ls[0], ls[2], ls[3]
+            if node_name.startswith('cu'):
+                memtotal = 64
+            elif node_name.startswith('fat'):
+                memtotal = 1506
+            node_stat[node_name] = [
+                    int(ncpu), float(load), memtotal, 0, 0]
+    return node_stat
+        
+def qstat():
+    node_jobid = collections.defaultdict(set)
+    qstat_p = os.popen('qstat -u \*')
+    for n in xrange(2):
+        qstat_p.next()
+    for line in qstat_p:
+        ls = line.strip().split()
+        if '@' in ls[7]:
+            node_name, jobid = ls[7].split('@')[1], ls[0]
+            node_jobid[node_name].add(jobid)
+    return node_jobid
+
+def qstat_f():
+    queue_status = {}
+    for line in os.popen('qstat -f'):
+        if '@' in line:
+            ls = line.split()
+            queue_name, node_name = ls[0].split('@')
+            if len(ls) == 6:
+                queue_status[node_name] = [queue_name, ls[5].strip()]
+            elif len(ls) == 5:
+                queue_status[node_name] = [queue_name, 'Normal']
+    return queue_status
+
+def qstat_j(node_stat, node_jobid):
+    for node_name in node_stat:
+        mem, cpu, match_n = 0, 0, 0
+        for line in os.popen('qstat -j {0}'.format(
+                ','.join(node_jobid[node_name]))):
+            match = re.match('hard resource_list:.*'
+                             'virtual_free=([0-9mMgG\.]+)', line)
+            if match:
+                match_n += 1
+                vf = match.group(1)
+                if vf.endswith('m') or vf.endswith('M'):
+                    mem += float(vf[:-1])
+                elif vf.endswith('g') or vf.endswith('G'):
+                    mem += float(vf[:-1])*1024
+                else:
+                    mem += float(vf)
+            match = re.match('hard resource_list:.+'
+                             'num_proc=(\d+)', line)
+            if match:
+                cpu += int(match.group(1))
+        mem += (len(node_jobid[node_name])-match_n)*4096
+        node_stat[node_name][3] = mem
+        node_stat[node_name][4] = cpu
+    return node_stat
+
+def qstat_explain(abnormal_dict):
+    explain_dict = {}
+    status_set = set(abnormal_dict.itervalues())
+    abnormal_node = False
+    for line in os.popen('qstat -explain {0}'.format(''.join(status_set))):
+        if '@' in line:
+            ls = line.split()
+            node_name = ls[0].split('@')[1]
+            if len(ls) == 6:
+                abnormal_node = True
+            elif len(ls) == 5:
+                abnormal_node = False
+        elif abnormal_node:
+            explain_dict[node_name] = line.strip()
+            abnormal_node = False
+    return explain_dict
+
+def main():
+    parser = argparse.ArgumentParser(
+            formatter_class = argparse.RawDescriptionHelpFormatter,
+            description = """\033[42;33m _____   __   _   _____   _____   _____   _____  \033[0m 
+\033[42;33m/  ___/ |  \ | | /  _  \ |  _  \ | ____| /  ___/ \033[0m
+\033[42;33m| |___  |   \| | | | | | | | | | | |__   | |___  \033[0m
+\033[42;33m\___  \ | |\   | | | | | | | | | |  __|  \___  \ \033[0m
+\033[42;33m ___| | | | \  | | |_| | | |_| | | |___   ___| | \033[0m
+\033[42;33m/_____/ |_|  \_| \_____/ |_____/ |_____| /_____/ \033[0m
+\033[42;33mA command-line tool for cluster status monitoring\033[0m
+\033[43;32m . Author  : Xiaofei Zeng                        \033[0m
+\033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
+\033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
+\033[43;32m . Version : 1.5                                 \033[0m
+\033[43;32m . Update  : 2017.12.8                           \033[0m""")
+    args = parser.parse_args()
+    node_stat = qhost()
+    node_jobid = qstat()
+    queue_status = qstat_f()
+    node_stat = qstat_j(node_stat, node_jobid)
+    abnormal_dict = collections.OrderedDict()
+    print('\033[33m{0:8}{1:13}{2:10}{3:8}{4:11}{5:12}{6}\033[0m'.format(
+            'NODE','FreeVF','FreeCPU','NJOB','LOAD%','QUEUE','STATUS'))
+    print('\033[33m--------------------------------'
+          '------------------------------------\033[0m')
+    for node_name, state in node_stat.iteritems():
+        if state[3]/1024 == int(state[3])/1024:
+            mem_status = '{0}/{1}G'.format(
+                    state[2]-int(state[3]/1024), state[2])
+        else:
+            mem_status = '{0:.1f}/{1}G'.format(
+                    state[2]-state[3]/1024, state[2])
+        cpu_status = '{0}/{1}'.format(state[0]-state[4], state[0])
+        njob = len(node_jobid[node_name])
+        job_status = '{0}/{1}'.format(njob, state[0])
+        load = state[1]/state[0]*100
+        queue, status = queue_status[node_name]
+        if load >= 100:
+            load = '[{0:.2f}]'.format(load)
+        else:
+            load = '{0:.2f}'.format(load)
+        # queue not normal
+        if status in {'a', 'A', 'au', 'E', 'o'}:
+            fcolor = '\033[41;37m'
+            abnormal_dict[node_name] = status
+        # exlusive
+        elif (state[3]/1024 >= state[2] or 
+                 state[0]-state[4] <= 0 or 
+                 njob >= state[0]):
+            fcolor = '\033[35m'
+        # free
+        elif state[3] == 0 and state[4] == 0:
+            fcolor = '\033[32m'
+        # partly used
+        else:
+            fcolor = '\033[34m'
+        print('{0}{1:8}{2:13}{3:10}'
+                '{4:8}{5:11}{6:12}{7:6}\033[0m'.format(
+                       fcolor, node_name, mem_status, cpu_status, 
+                       job_status, load, queue, status))
+    if abnormal_dict:
+        print('\033[33m-------------------------------'
+              '-------------------------------------\033[0m')
+        explain_dict = qstat_explain(abnormal_dict)
+        for node_name in abnormal_dict:
+            print('\033[41;37m{0:8}{1:60}\033[0m'.format(node_name, explain_dict[node_name]))
+    print('\033[33m-------------------------------'
+          '-------------------------------------\033[0m')
+    print('\033[33m{0:10}\033[0m\033[32m{1:8}\033[0m'
+          '\033[34m{2:8}\033[0m\033[35m{3:8}\033[0m'
+          '\033[41;37m{4}\033[0m'.format(
+                  'Legend:','free','part','full', 'abnormal'))
+
+if __name__ == '__main__':
+    main()
