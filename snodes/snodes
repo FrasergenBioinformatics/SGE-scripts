@@ -84,7 +84,7 @@ def qstat_j(node_stat, node_jobid):
 
 
 def qstat_explain(abnormal_dict):
-    explain_dict = {}
+    explain_dict = collections.defaultdict(list)
     status_set = set(abnormal_dict.itervalues())
     abnormal_node = False
     for line in os.popen('qstat -explain {0}'.format(''.join(status_set))):
@@ -95,9 +95,10 @@ def qstat_explain(abnormal_dict):
                 abnormal_node = True
             elif len(ls) == 5:
                 abnormal_node = False
-        elif abnormal_node:
-            explain_dict[node_name] = line.strip()
+        elif '---' in line or not line.strip():
             abnormal_node = False
+        elif abnormal_node:
+            explain_dict[node_name].append(line.strip())
     return explain_dict
 
 
@@ -147,8 +148,8 @@ def main():
 \033[43;32m . Author  : Xiaofei Zeng                        \033[0m
 \033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
 \033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
-\033[43;32m . Version : 1.57                                \033[0m
-\033[43;32m . Update  : 2017.12.11                          \033[0m""")
+\033[43;32m . Version : 1.58                                \033[0m
+\033[43;32m . Update  : 2017.12.12                          \033[0m""")
     parser.add_argument('-r', '--rank', 
             action='store_true', default=False,
             help='show the ranking list for the "Top 10 Snodes Users"')
@@ -216,8 +217,9 @@ def main():
               '-------------------------------------\033[0m')
         explain_dict = qstat_explain(abnormal_dict)
         for node_name in abnormal_dict:
-            print('\033[41;37m{0:8}{1:60}\033[0m'.format(
-                    node_name, explain_dict[node_name]))
+            for exp in explain_dict[node_name]:
+                print('\033[41;37m{0:8}{1:60}\033[0m'.format(
+                        node_name, exp))
     print('\033[33m-------------------------------'
           '-------------------------------------\033[0m')
     print('\033[33m{0:10}\033[0m\033[32m{1:8}\033[0m'
