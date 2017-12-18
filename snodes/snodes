@@ -95,7 +95,7 @@ def qstat_explain(abnormal_dict):
                 abnormal_node = True
             elif len(ls) == 5:
                 abnormal_node = False
-        elif '---' in line or not line.strip():
+        elif '---' in line or not line.strip() or line.strip().split()[0].isdigit():
             abnormal_node = False
         elif abnormal_node:
             explain_dict[node_name].append(line.strip())
