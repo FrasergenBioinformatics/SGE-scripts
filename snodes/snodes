@@ -11,23 +11,34 @@ import os
 import collections
 import re
 import argparse
+import random
 
-
-def qhost():
+def qselect():
     node_stat = collections.OrderedDict()
-    qhost_p = os.popen('qhost')
+    qselect_p = os.popen("qselect | awk -F'@' '{print $2}' | sort")
+    for line in qselect_p:
+        lsp = line.strip()
+        if lsp:
+            node_stat[lsp] = []
+    return node_stat
+
+def qhost(node_stat):
+    qhost_p = os.popen('qhost -h {0}'.format(','.join(node_stat.iterkeys())))
     for n in xrange(3):
         qhost_p.next()
     for line in qhost_p:
         ls = line.split()
-        if ls[0] not in {'ln01', 'mu01'}:
-            node_name, ncpu, load = ls[0], ls[2], ls[3]
-            if node_name.startswith('cu'):
-                memtotal = 64
-            elif node_name.startswith('fat'):
-                memtotal = 1506
-            node_stat[node_name] = [
-                    int(ncpu), load, memtotal, 0, 0]
+        node_name, load = ls[0], ls[3]
+        cpufree = int(ls[2])
+        # need to get the info from SGE
+        if node_name.startswith('cu'):
+            memtotal = 64
+            cputotal = 24
+        elif node_name.startswith('fat'):
+            memtotal = 1506
+            cputotal = 96
+        node_stat[node_name] = [
+                cputotal, load, memtotal, 0, cpufree]
     return node_stat
 
 
@@ -50,6 +61,7 @@ def qstat_f():
         if '@' in line:
             ls = line.split()
             queue_name, node_name = ls[0].split('@')
+            ls[2].split('/')
             if len(ls) == 6:
                 queue_status[node_name] = [queue_name, ls[5].strip()]
             elif len(ls) == 5:
@@ -59,7 +71,7 @@ def qstat_f():
 
 def qstat_j(node_stat, node_jobid):
     for node_name in node_stat:
-        mem, cpu, match_n = 0, 0, 0
+        mem, match_n = 0, 0
         for line in os.popen('qstat -j {0}'.format(
                 ','.join(node_jobid[node_name]))):
             match = re.match('hard resource_list:.*'
@@ -75,11 +87,8 @@ def qstat_j(node_stat, node_jobid):
                     mem += float(vf)
             match = re.match('hard resource_list:.+'
                              'num_proc=(\d+)', line)
-            if match:
-                cpu += int(match.group(1))
         mem += (len(node_jobid[node_name])-match_n)*4096
         node_stat[node_name][3] = mem
-        node_stat[node_name][4] = cpu
     return node_stat
 
 
@@ -133,7 +142,6 @@ def rank(log_file):
         print('\033[42;33m{0}\033[0m{1}'.format(
                 ' '*int(times/bin_size), times))
 
-
 def main():
     parser = argparse.ArgumentParser(
             formatter_class = argparse.RawDescriptionHelpFormatter,
@@ -148,8 +156,8 @@ def main():
 \033[43;32m . Author  : Xiaofei Zeng                        \033[0m
 \033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
 \033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
-\033[43;32m . Version : 1.58                                \033[0m
-\033[43;32m . Update  : 2017.12.12                          \033[0m""")
+\033[43;32m . Version : 1.60                                \033[0m
+\033[43;32m . Update  : 2017.12.26                          \033[0m""")
     parser.add_argument('-r', '--rank', 
             action='store_true', default=False,
             help='show the ranking list for the "Top 10 Snodes Users"')
@@ -162,8 +170,8 @@ def main():
     if args.rank:
         rank(log_file)
         sys.exit()
-    
-    node_stat = qhost()
+    node_stat = qselect()
+    node_stat = qhost(node_stat)
     node_jobid = qstat()
     queue_status = qstat_f()
     node_stat = qstat_j(node_stat, node_jobid)
@@ -179,7 +187,7 @@ def main():
         else:
             mem_status = '{0:.1f}/{1}G'.format(
                     state[2]-state[3]/1024, state[2])
-        cpu_status = '{0}/{1}'.format(state[0]-state[4], state[0])
+        cpu_status = '{0}/{1}'.format(state[4], state[0])
         njob = len(node_jobid[node_name])
         job_status = '{0}/{1}'.format(njob, state[0])
         queue, status = queue_status[node_name]
@@ -199,11 +207,11 @@ def main():
             abnormal_dict[node_name] = status
         # exlusive
         elif (state[3]/1024 >= state[2] or 
-                 state[0]-state[4] <= 0 or 
+                 state[4] <= 0 or 
                  njob >= state[0]):
             fcolor = '\033[35m'
         # free
-        elif state[3] == 0 and state[4] == 0:
+        elif state[3] == 0 and state[0] == state[4]:
             fcolor = '\033[32m'
         # partly used
         else:
