@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Author: zengxiaofei
-# Email: zengxiaofei@frasergen.com
-# Created Time: 2017-12-01 08:59
-
 from __future__ import print_function
 import sys
 import os
@@ -50,8 +46,8 @@ def qstat():
     for line in qstat_p:
         ls = line.strip().split()
         if '@' in ls[7]:
-            node_name, jobid = ls[7].split('@')[1], ls[0]
-            node_jobid[node_name].add(jobid)
+            node_name, jobid, user = ls[7].split('@')[1], ls[0], ls[3]
+            node_jobid[node_name].add((jobid, user))
     return node_jobid
 
 
@@ -73,7 +69,7 @@ def qstat_j(node_stat, node_jobid):
     for node_name in node_stat:
         mem, match_n = 0, 0
         for line in os.popen('qstat -j {0}'.format(
-                ','.join(node_jobid[node_name]))):
+                ','.join([job[0] for job in node_jobid[node_name]]))):
             match = re.match('hard resource_list:.*'
                              'virtual_free=([0-9mMgG\.]+)', line)
             if match:
@@ -87,14 +83,14 @@ def qstat_j(node_stat, node_jobid):
                     mem += float(vf)
             match = re.match('hard resource_list:.+'
                              'num_proc=(\d+)', line)
-        mem += (len(node_jobid[node_name])-match_n)*4096
+        mem += (len([job[0] for job in node_jobid[node_name]])-match_n)*3072
         node_stat[node_name][3] = mem
     return node_stat
 
 
 def qstat_explain(abnormal_dict):
     explain_dict = collections.defaultdict(list)
-    status_set = set(abnormal_dict.itervalues())
+    status_set = {s for s in ''.join(set(abnormal_dict.itervalues())) if s in 'acAE'}
     abnormal_node = False
     for line in os.popen('qstat -explain {0}'.format(''.join(status_set))):
         if '@' in line:
@@ -156,8 +152,8 @@ def main():
 \033[43;32m . Author  : Xiaofei Zeng                        \033[0m
 \033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
 \033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
-\033[43;32m . Version : 1.60                                \033[0m
-\033[43;32m . Update  : 2017.12.26                          \033[0m""")
+\033[43;32m . Version : 1.61                                \033[0m
+\033[43;32m . Update  : 2018.2.1                            \033[0m""")
     parser.add_argument('-r', '--rank', 
             action='store_true', default=False,
             help='show the ranking list for the "Top 10 Snodes Users"')
@@ -177,7 +173,7 @@ def main():
     node_stat = qstat_j(node_stat, node_jobid)
     abnormal_dict = collections.OrderedDict()
     print('\033[33m{0:8}{1:13}{2:10}{3:8}{4:11}{5:12}{6}\033[0m'.format(
-            'NODE','FreeVF','FreeCPU','NJOB','LOAD%','QUEUE','STATUS'))
+            'NODE','FreeVF','FreeCPU','NJOB','%LOAD','QUEUE','STATUS'))
     print('\033[33m--------------------------------'
           '------------------------------------\033[0m')
     for node_name, state in node_stat.iteritems():
@@ -188,7 +184,7 @@ def main():
             mem_status = '{0:.1f}/{1}G'.format(
                     state[2]-state[3]/1024, state[2])
         cpu_status = '{0}/{1}'.format(state[4], state[0])
-        njob = len(node_jobid[node_name])
+        njob = len([job[0] for job in node_jobid[node_name]])
         job_status = '{0}/{1}'.format(njob, state[0])
         queue, status = queue_status[node_name]
         if re.match(r'[0-9\.]+', state[1]):
@@ -215,7 +211,7 @@ def main():
             fcolor = '\033[32m'
         # partly used
         else:
-            fcolor = '\033[34m'
+            fcolor = '\033[36m'
         print('{0}{1:8}{2:13}{3:10}'
                 '{4:8}{5:11}{6:12}{7:6}\033[0m'.format(
                        fcolor, node_name, mem_status, cpu_status, 
@@ -228,10 +224,12 @@ def main():
             for exp in explain_dict[node_name]:
                 print('\033[41;37m{0:8}{1:60}\033[0m'.format(
                         node_name, exp))
+                print('\033[41;37m{0:8}{1:60}\033[0m'.format(
+                    node_name, 'affected: '+','.join({job[1] for job in node_jobid[node_name]})))
     print('\033[33m-------------------------------'
           '-------------------------------------\033[0m')
     print('\033[33m{0:10}\033[0m\033[32m{1:8}\033[0m'
-          '\033[34m{2:8}\033[0m\033[35m{3:8}\033[0m'
+          '\033[36m{2:8}\033[0m\033[35m{3:8}\033[0m'
           '\033[41;37m{4}\033[0m'.format(
                   'Legend:','free','part','full', 'abnormal'))
     log(log_file) 
