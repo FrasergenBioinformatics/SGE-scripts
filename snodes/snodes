@@ -39,7 +39,7 @@ def qhost(node_stat):
 
 
 def qstat():
-    node_jobid = collections.defaultdict(set)
+    node_jobid = collections.defaultdict(list)
     qstat_p = os.popen('qstat -u \*')
     for n in xrange(2):
         qstat_p.next()
@@ -47,7 +47,7 @@ def qstat():
         ls = line.strip().split()
         if '@' in ls[7]:
             node_name, jobid, user = ls[7].split('@')[1], ls[0], ls[3]
-            node_jobid[node_name].add((jobid, user))
+            node_jobid[node_name].append((jobid, user))
     return node_jobid
 
 
@@ -68,8 +68,12 @@ def qstat_f():
 def qstat_j(node_stat, node_jobid):
     for node_name in node_stat:
         mem, match_n = 0, 0
-        for line in os.popen('qstat -j {0}'.format(
-                ','.join([job[0] for job in node_jobid[node_name]]))):
+        if len(node_jobid[node_name]) == len(set(node_jobid[node_name])):
+            cmd = 'qstat -j {0}'.format(','.join([job[0] for job in node_jobid[node_name]]))
+        # if tasks with same jobid but different taskid:
+        else:
+            cmd = '&&'.join(['qstat -j '+job[0] for job in node_jobid[node_name]])
+        for line in os.popen(cmd):
             match = re.match('hard resource_list:.*'
                              'virtual_free=([0-9mMgG\.]+)', line)
             if match:
@@ -152,8 +156,8 @@ def main():
 \033[43;32m . Author  : Xiaofei Zeng                        \033[0m
 \033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
 \033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
-\033[43;32m . Version : 1.61                                \033[0m
-\033[43;32m . Update  : 2018.2.1                            \033[0m""")
+\033[43;32m . Version : 1.62                                \033[0m
+\033[43;32m . Update  : 2018.2.26                           \033[0m""")
     parser.add_argument('-r', '--rank', 
             action='store_true', default=False,
             help='show the ranking list for the "Top 10 Snodes Users"')
