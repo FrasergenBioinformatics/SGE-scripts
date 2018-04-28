@@ -1,0 +1,243 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from __future__ import print_function
+import sys
+import os
+import collections
+import re
+import argparse
+import random
+
+def qselect():
+    node_stat = collections.OrderedDict()
+    qselect_p = os.popen("qselect | awk -F'@' '{print $2}' | sort")
+    for line in qselect_p:
+        lsp = line.strip()
+        if lsp:
+            node_stat[lsp] = []
+    return node_stat
+
+def qhost(node_stat):
+    qhost_p = os.popen('qhost -h {0}'.format(','.join(node_stat.iterkeys())))
+    for n in xrange(3):
+        qhost_p.next()
+    for line in qhost_p:
+        ls = line.split()
+        node_name, load = ls[0], ls[3]
+        cpufree = int(ls[2])
+        # need to get the info from SGE
+        if node_name.startswith('cu'):
+            memtotal = 64
+            cputotal = 24
+        elif node_name.startswith('fat'):
+            memtotal = 1506
+            cputotal = 96
+        node_stat[node_name] = [
+                cputotal, load, memtotal, 0, cpufree]
+    return node_stat
+
+
+def qstat():
+    node_jobid = collections.defaultdict(list)
+    qstat_p = os.popen('qstat -u \*')
+    for n in xrange(2):
+        qstat_p.next()
+    for line in qstat_p:
+        ls = line.strip().split()
+        if '@' in ls[7]:
+            node_name, jobid, user = ls[7].split('@')[1], ls[0], ls[3]
+            node_jobid[node_name].append((jobid, user))
+    return node_jobid
+
+
+def qstat_f():
+    queue_status = {}
+    for line in os.popen('qstat -f'):
+        if '@' in line:
+            ls = line.split()
+            queue_name, node_name = ls[0].split('@')
+            ls[2].split('/')
+            if len(ls) == 6:
+                queue_status[node_name] = [queue_name, ls[5].strip()]
+            elif len(ls) == 5:
+                queue_status[node_name] = [queue_name, 'Normal']
+    return queue_status
+
+
+def qstat_j(node_stat, node_jobid):
+    for node_name in node_stat:
+        mem, match_n = 0, 0
+        if len(node_jobid[node_name]) == len(set(node_jobid[node_name])):
+            cmd = 'qstat -j {0}'.format(','.join([job[0] for job in node_jobid[node_name]]))
+        # if tasks with same jobid but different taskid:
+        else:
+            cmd = '&&'.join(['qstat -j '+job[0] for job in node_jobid[node_name]])
+        for line in os.popen(cmd):
+            match = re.match('hard resource_list:.*'
+                             'virtual_free=([0-9mMgG\.]+)', line)
+            if match:
+                match_n += 1
+                vf = match.group(1)
+                if vf.endswith('m') or vf.endswith('M'):
+                    mem += float(vf[:-1])
+                elif vf.endswith('g') or vf.endswith('G'):
+                    mem += float(vf[:-1])*1024
+                else:
+                    mem += float(vf)
+            match = re.match('hard resource_list:.+'
+                             'num_proc=(\d+)', line)
+        mem += (len([job[0] for job in node_jobid[node_name]])-match_n)*3072
+        node_stat[node_name][3] = mem
+    return node_stat
+
+
+def qstat_explain(abnormal_dict):
+    explain_dict = collections.defaultdict(list)
+    status_set = {s for s in ''.join(set(abnormal_dict.itervalues())) if s in 'acAE'}
+    abnormal_node = False
+    for line in os.popen('qstat -explain {0}'.format(''.join(status_set))):
+        if '@' in line:
+            ls = line.split()
+            node_name = ls[0].split('@')[1]
+            if len(ls) == 6:
+                abnormal_node = True
+            elif len(ls) == 5:
+                abnormal_node = False
+        elif '---' in line or not line.strip() or line.strip().split()[0].isdigit():
+            abnormal_node = False
+        elif abnormal_node:
+            explain_dict[node_name].append(line.strip())
+    return explain_dict
+
+
+def log(log_file):
+    whoami = os.popen('whoami').read().strip()
+    if whoami != 'zengxiaofei':
+        date = os.popen('date "+%Y-%m-%d	%H:%M:%S"').read().strip()
+        hostname = os.popen('hostname').read()
+        with open(log_file, 'a') as flog:
+            flog.write('{0}\t{1}\t{2}'.format(whoami, date, hostname))
+
+
+def rank(log_file):
+    user_dict = collections.defaultdict(int)
+    try:
+        with open(log_file) as f:
+            for line in f:
+                ls = line.split('\t')
+                user_dict[ls[0]] += 1
+    except IOError:
+        print('Cannot open the log file: {0}'.format(log_file))
+        sys.exit(1)
+    # sort
+    sorted_list = sorted(
+            user_dict.iteritems(), 
+            key=lambda x: x[1], reverse=True)
+    highest = sorted_list[0][1]
+    bin_size = float(highest)/50
+    print('Top 10 Snodes Users:')
+    for n, (user, times) in enumerate(sorted_list[:10]):
+        print('{0:<4}{1:12}'.format(n+1, user), end='')
+        print('\033[42;33m{0}\033[0m{1}'.format(
+                ' '*int(times/bin_size), times))
+
+def main():
+    parser = argparse.ArgumentParser(
+            formatter_class = argparse.RawDescriptionHelpFormatter,
+            description = """
+\033[42;33m _____   __   _   _____   _____   _____   _____  \033[0m 
+\033[42;33m/  ___/ |  \ | | /  _  \ |  _  \ | ____| /  ___/ \033[0m
+\033[42;33m| |___  |   \| | | | | | | | | | | |__   | |___  \033[0m
+\033[42;33m\___  \ | |\   | | | | | | | | | |  __|  \___  \ \033[0m
+\033[42;33m ___| | | | \  | | |_| | | |_| | | |___   ___| | \033[0m
+\033[42;33m/_____/ |_|  \_| \_____/ |_____/ |_____| /_____/ \033[0m
+\033[42;33mA command-line tool for cluster status monitoring\033[0m
+\033[43;32m . Author  : Xiaofei Zeng                        \033[0m
+\033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
+\033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
+\033[43;32m . Version : 1.62                                \033[0m
+\033[43;32m . Update  : 2018.2.26                           \033[0m""")
+    parser.add_argument('-r', '--rank', 
+            action='store_true', default=False,
+            help='show the ranking list for the "Top 10 Snodes Users"')
+    args = parser.parse_args()
+    
+    log_file = os.path.join(
+            os.path.split(os.path.realpath(__file__))[0], 
+            'snodes.log')
+    # show the ranking list
+    if args.rank:
+        rank(log_file)
+        sys.exit()
+    node_stat = qselect()
+    node_stat = qhost(node_stat)
+    node_jobid = qstat()
+    queue_status = qstat_f()
+    node_stat = qstat_j(node_stat, node_jobid)
+    abnormal_dict = collections.OrderedDict()
+    print('\033[33m{0:8}{1:13}{2:10}{3:8}{4:11}{5:12}{6}\033[0m'.format(
+            'NODE','FreeVF','FreeCPU','NJOB','%LOAD','QUEUE','STATUS'))
+    print('\033[33m--------------------------------'
+          '------------------------------------\033[0m')
+    for node_name, state in node_stat.iteritems():
+        if state[3]/1024 == int(state[3])/1024:
+            mem_status = '{0}/{1}G'.format(
+                    state[2]-int(state[3]/1024), state[2])
+        else:
+            mem_status = '{0:.1f}/{1}G'.format(
+                    state[2]-state[3]/1024, state[2])
+        cpu_status = '{0}/{1}'.format(state[4], state[0])
+        njob = len([job[0] for job in node_jobid[node_name]])
+        job_status = '{0}/{1}'.format(njob, state[0])
+        queue, status = queue_status[node_name]
+        if re.match(r'[0-9\.]+', state[1]):
+            load = float(state[1])/state[0]*100
+            if load >= 100:
+                load = '[{0:.2f}]'.format(load)
+            else:
+                load = '{0:.2f}'.format(load)
+        else:
+            load = state[1]
+
+        # queue not normal
+        # if status in {'a', 'A', 'au', 'E', 'o', 'aAu'}:
+        if status != 'Normal':
+            fcolor = '\033[41;37m'
+            abnormal_dict[node_name] = status
+        # exlusive
+        elif (state[3]/1024 >= state[2] or 
+                 state[4] <= 0 or 
+                 njob >= state[0]):
+            fcolor = '\033[35m'
+        # free
+        elif state[3] == 0 and state[0] == state[4]:
+            fcolor = '\033[32m'
+        # partly used
+        else:
+            fcolor = '\033[36m'
+        print('{0}{1:8}{2:13}{3:10}'
+                '{4:8}{5:11}{6:12}{7:6}\033[0m'.format(
+                       fcolor, node_name, mem_status, cpu_status, 
+                       job_status, load, queue, status))
+    if abnormal_dict:
+        print('\033[33m-------------------------------'
+              '-------------------------------------\033[0m')
+        explain_dict = qstat_explain(abnormal_dict)
+        for node_name in abnormal_dict:
+            for exp in explain_dict[node_name]:
+                print('\033[41;37m{0:8}{1:60}\033[0m'.format(
+                        node_name, exp))
+                print('\033[41;37m{0:8}{1:60}\033[0m'.format(
+                    node_name, 'affected: '+','.join({job[1] for job in node_jobid[node_name]})))
+    print('\033[33m-------------------------------'
+          '-------------------------------------\033[0m')
+    print('\033[33m{0:10}\033[0m\033[32m{1:8}\033[0m'
+          '\033[36m{2:8}\033[0m\033[35m{3:8}\033[0m'
+          '\033[41;37m{4}\033[0m'.format(
+                  'Legend:','free','part','full', 'abnormal'))
+    log(log_file) 
+
+
+if __name__ == '__main__':
+    main()
