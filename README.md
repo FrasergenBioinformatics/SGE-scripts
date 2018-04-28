@@ -6,7 +6,16 @@ Some scripts for managing nodes and jobs on SGE
 
 Snodes is a command-line tool for showing the current status of queues and available resources.
 
+### Features:
+
+* decorate the status of queues in different colors (free, partly used, full)
+
+* highlight abnormal queues
+
+* show the detailed informations of abnormal queues (reasons, affected users)
+
 ![snodes.v2](https://github.com/zengxiaofei/SGE-scripts/blob/master/snodes_v2/screenshot.png)
+
 
 ## snodes.v1
 
