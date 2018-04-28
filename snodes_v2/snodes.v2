@@ -1,0 +1,235 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+\033[42;33m _____   __   _   _____   _____   _____   _____  \033[0m 
+\033[42;33m/  ___/ |  \ | | /  _  \ |  _  \ | ____| /  ___/ \033[0m
+\033[42;33m| |___  |   \| | | | | | | | | | | |__   | |___  \033[0m
+\033[42;33m\___  \ | |\   | | | | | | | | | |  __|  \___  \ \033[0m
+\033[42;33m ___| | | | \  | | |_| | | |_| | | |___   ___| | \033[0m
+\033[42;33m/_____/ |_|  \_| \_____/ |_____/ |_____| /_____/ \033[0m
+\033[42;33mA command-line tool for cluster status monitoring\033[0m
+\033[43;32m . Author  : Xiaofei Zeng                        \033[0m
+\033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
+\033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
+\033[43;32m . Version : 2.00                                \033[0m
+\033[43;32m . Update  : 2018.4.28                           \033[0m
+"""
+
+from __future__ import print_function
+import sys
+import os
+import collections
+import re
+import argparse
+import random
+
+
+def qconf_se(host_name):
+    for line in os.popen('qconf -se {0}'.format(host_name)):
+        if line.startswith('complex_values'):
+            match = re.match(r'complex_values +'
+                    'num_proc=(\d+),virtual_free=(\d+)G', line)
+            return match.groups()
+
+def qstat_F():
+    queue_stat = collections.defaultdict(list)
+    new_host_start, not_first = False, False
+    for line in os.popen('qstat -F'):
+        ls = line.strip()
+        if '---' in line:
+            if not_first:
+                queue_stat[(queue_name, host_name)].extend([
+                        virtual_free, num_proc,
+                        njob, njob_total,
+                        load_avg, queue_state])
+            not_first = True
+            new_host_start = True
+        elif new_host_start:
+            cols = ls.split()
+            queue_host = cols[0]
+            queue_name, host_name = queue_host.split('@')
+            njob, njob_total = cols[2].split('/')[1:3]
+            if len(cols) == 5:
+                queue_state = 'Normal'
+            elif len(cols) == 6:
+                queue_state = cols[-1]
+            new_host_start = False
+        elif ls.startswith('hc:num_proc='):
+            num_proc = int(line.split('hc:num_proc=')[-1])
+        elif ls.startswith('hc:virtual_free='):
+            if ls.endswith('M'):
+                virtual_free = float(
+                        ls.split('hc:virtual_free=')[-1].rstrip('M'))/1024
+            elif ls.endswith('G'):
+                virtual_free = float(
+                        ls.split('hc:virtual_free=')[-1].rstrip('G'))
+            else:
+                virtual_free = float(ls.split('hc:virtual_free=')[-1])
+                assert virtual_free == 0
+        elif ls.startswith('hl:load_avg='):
+            load_avg = float(line.split('hl:load_avg=')[-1])
+    queue_stat[(queue_name, host_name)].extend([
+            virtual_free, num_proc,
+            njob, njob_total,
+            load_avg, queue_state])
+    return queue_stat
+
+
+def qstat_explain(abnormal_dict):
+    explain_dict = collections.defaultdict(list)
+    states_set = {s for s in ''.join(
+            set(abnormal_dict.itervalues())) if s in 'acAE'}
+    abnormal_node = False
+    for line in os.popen('qstat -explain {0}'.format(''.join(states_set))):
+        if '@' in line:
+            ls = line.split()
+            queue_name, host_name = ls[0].split('@')[:2]
+            if len(ls) == 6:
+                abnormal_node = True
+            elif len(ls) == 5:
+                abnormal_node = False
+        elif ('---' in line 
+              or not line.strip() 
+              or line.strip().split()[0].isdigit()):
+            abnormal_node = False
+        elif abnormal_node:
+            explain_dict[(queue_name, host_name)].append(line.strip())
+    return explain_dict
+
+
+def qstat_users():
+    user_dict = collections.defaultdict(set)
+    for line in os.popen("qstat -u \* | awk 'NR>2'"):
+        ls = line.split()
+        if '@' in ls[7]:
+            user_dict[ls[7]].add(ls[3])
+    return user_dict
+
+def log(log_file):
+    whoami = os.popen('whoami').read().strip()
+    if whoami != 'zengxiaofei':
+        date = os.popen('date "+%Y-%m-%d	%H:%M:%S"').read().strip()
+        hostname = os.popen('hostname').read()
+        with open(log_file, 'a') as flog:
+            flog.write('{0}\t{1}\t{2}'.format(whoami, date, hostname))
+
+
+def rank(log_file):
+    user_dict = collections.defaultdict(int)
+    try:
+        with open(log_file) as f:
+            for n, line in enumerate(f):
+                ls = line.split('\t')
+                user_dict[ls[0]] += 1
+    except IOError:
+        print('Cannot open the log file: {0}'.format(log_file))
+        sys.exit(1)
+    # sort
+    sorted_list = sorted(
+            user_dict.iteritems(), 
+            key=lambda x: x[1], reverse=True)
+    highest = sorted_list[0][1]
+    bin_size = float(highest)/50
+    print('Usage count: {0}'.format(n))
+    print('User count: {0}'.format(len(user_dict)))
+    print('Top 10 Snodes Users:')
+    for m, (user, times) in enumerate(sorted_list[:10]):
+        print('{0:<4}{1:12}'.format(m+1, user), end='')
+        print('\033[42;33m{0}\033[0m{1}'.format(
+                ' '*int(times/bin_size), times))
+
+def main():
+    parser = argparse.ArgumentParser(
+            formatter_class = argparse.RawDescriptionHelpFormatter,
+            description = __doc__)
+    parser.add_argument('-r', '--rank', 
+            action='store_true', default=False,
+            help='show the ranking list for the "Top 10 Snodes Users"')
+    args = parser.parse_args()
+    
+    log_file = os.path.join(
+            os.path.split(os.path.realpath(__file__))[0], 
+            'snodes.log')
+    ## show the ranking list
+    if args.rank:
+        rank(log_file)
+        sys.exit()
+    
+    ## main function
+    queue_stat = qstat_F()
+    abnormal_dict = {}
+    for queue_host, stat_list in queue_stat.iteritems():
+        # queue_stat ==
+        # {(queue_name, host_name) : 
+        # [virtual_free, num_proc, njob, njob_total, 
+        # %load, queue_state, ncpu_total, vmem_total]}
+        nproc, vf = qconf_se(queue_host[1])
+        stat_list[4] = stat_list[4]/int(nproc)*100
+        stat_list.extend((nproc, vf))
+    print('\033[33m{0:18}{1:13}{2:10}{3:9}{4:11}{5:6}\033[0m'.format(
+            'Queue','VirtualFree','FreeCPU', 'NJOB', '%LOAD','States'))
+    print('\033[33m----------------------------------'
+          '---------------------------------\033[0m')
+    for queue_host, stat_list in sorted(
+            queue_stat.iteritems(), key=lambda x:x[0][1]):
+        ## vmem status
+        # no decimal number
+        if stat_list[0] == int(stat_list[0]):
+            vmem_stat = '{0}/{1}G'.format(int(stat_list[0]), stat_list[7])
+        # decimal number
+        else:
+            vmem_stat = '{0:.1f}/{1}G'.format(stat_list[0], stat_list[7])
+        ## ncpu status
+        ncpu_stat = '{0}/{1}'.format(stat_list[1], stat_list[6])
+        ## njob status
+        njob_stat = '{0}/{1}'.format(stat_list[2], stat_list[3])
+        ## %load status
+        if stat_list[4] >= 100:
+            load_stat = '[{0:.2f}]'.format(stat_list[4])
+        else:
+            load_stat = '{0:.2f}'.format(stat_list[4])
+        ## colors
+        # queue not normal
+        if stat_list[5] != 'Normal':
+            abnormal_dict[queue_host] = stat_list[5]
+            fcolor = '\033[41;37m'
+        # exlusive
+        elif (stat_list[0] == 0 or 
+                 stat_list[1] == 0 or 
+                 int(stat_list[2]) >= int(stat_list[3])):
+            fcolor = '\033[35m'
+        # free
+        elif (stat_list[0] == float(stat_list[7]) 
+              and stat_list[1] == float(stat_list[6])):
+            fcolor = '\033[32m'
+        # partly used
+        else:
+            fcolor = '\033[36m'
+        print('{0}{1:18}{2:13}{3:10}{4:9}'
+              '{5:11}{6:6}\033[0m'.format(
+                      fcolor, '@'.join(queue_host), vmem_stat, ncpu_stat, 
+                      njob_stat, load_stat, stat_list[5]))
+    if abnormal_dict:
+        user_dict = qstat_users()
+        print('\033[33m---------------------------------'
+              '----------------------------------\033[0m')
+        explain_dict = qstat_explain(abnormal_dict)
+        for queue_host in abnormal_dict:
+            for exp in explain_dict[queue_host]:
+                print('\033[41;37m{0:15}{1:52}\033[0m'.format(
+                        '@'.join(queue_host), exp))
+                print('\033[41;37m{0:15}{1:52}\033[0m'.format(
+                        '', 'affected:'+','.join(
+                            {user for user in user_dict['@'.join(queue_host)]})))
+    print('\033[33m----------------------------------'
+          '---------------------------------\033[0m')
+    print('\033[33m{0:10}\033[0m\033[32m{1:8}\033[0m'
+          '\033[36m{2:8}\033[0m\033[35m{3:8}\033[0m'
+          '\033[41;37m{4}\033[0m'.format(
+                  'Legend:','free','part','full', 'abnormal'))
+    log(log_file) 
+
+
+if __name__ == '__main__':
+    main()
