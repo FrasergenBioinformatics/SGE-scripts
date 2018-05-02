@@ -12,8 +12,8 @@
 \033[43;32m . Author  : Xiaofei Zeng                        \033[0m
 \033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
 \033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
-\033[43;32m . Version : 2.01                                \033[0m
-\033[43;32m . Update  : 2018.4.29                           \033[0m
+\033[43;32m . Version : 2.02                                \033[0m
+\033[43;32m . Update  : 2018.5.2                            \033[0m
 """
 
 from __future__ import print_function
@@ -55,20 +55,20 @@ def qstat_F():
             elif len(cols) == 6:
                 queue_state = cols[-1]
             new_host_start = False
-        elif 'num_proc=' in ls:
-            num_proc = int(line.split('num_proc=')[-1])
-        elif 'virtual_free' in ls:
+        elif ':num_proc=' in ls:
+            num_proc = int(line.split(':num_proc=')[-1])
+        elif ':virtual_free' in ls:
             if ls.endswith('M'):
                 virtual_free = float(
-                        ls.split('virtual_free=')[-1].rstrip('M'))/1024
+                        ls.split(':virtual_free=')[-1].rstrip('M'))/1024
             elif ls.endswith('G'):
                 virtual_free = float(
-                        ls.split('virtual_free=')[-1].rstrip('G'))
+                        ls.split(':virtual_free=')[-1].rstrip('G'))
             else:
-                virtual_free = float(ls.split('virtual_free=')[-1])
+                virtual_free = float(ls.split(':virtual_free=')[-1])
                 assert virtual_free == 0
-        elif 'load_avg=' in ls:
-            load_avg = float(line.split('load_avg=')[-1])
+        elif ':load_avg=' in ls:
+            load_avg = float(line.split(':load_avg=')[-1])
     queue_stat[(queue_name, host_name)].extend([
             virtual_free, num_proc,
             njob, njob_total,
@@ -165,11 +165,11 @@ def main():
         # [virtual_free, num_proc, njob, njob_total, 
         # %load, queue_state, ncpu_total, vmem_total]}
         nproc, vf = qconf_se(queue_host[1])
-        stat_list[4] = stat_list[4]/int(nproc)*100
+        stat_list[4] = 100*stat_list[4]/int(nproc)
         stat_list.extend((nproc, vf))
-    print('\033[33m{0:18}{1:13}{2:10}{3:9}{4:11}{5:6}\033[0m'.format(
+    print('\033[33m{0:18}{1:15}{2:11}{3:9}{4:11}{5:6}\033[0m'.format(
             'Queue','VirtualFree','FreeCPU', 'NJOB', '%LOAD','States'))
-    print('\033[33m----------------------------------'
+    print('\033[33m-------------------------------------'
           '---------------------------------\033[0m')
     for queue_host, stat_list in sorted(
             queue_stat.iteritems(), key=lambda x:x[0][1]):
@@ -179,7 +179,7 @@ def main():
             vmem_stat = '{0}/{1}G'.format(int(stat_list[0]), stat_list[7])
         # decimal number
         else:
-            vmem_stat = '{0:.1f}/{1}G'.format(stat_list[0], stat_list[7])
+            vmem_stat = '{0}/{1}G'.format(int(stat_list[0]*10)/10.0, stat_list[7])
         ## ncpu status
         ncpu_stat = '{0}/{1}'.format(stat_list[1], stat_list[6])
         ## njob status
@@ -206,23 +206,23 @@ def main():
         # partly used
         else:
             fcolor = '\033[36m'
-        print('{0}{1:18}{2:13}{3:10}{4:9}'
+        print('{0}{1:18}{2:15}{3:11}{4:9}'
               '{5:11}{6:6}\033[0m'.format(
                       fcolor, '@'.join(queue_host), vmem_stat, ncpu_stat, 
                       njob_stat, load_stat, stat_list[5]))
     if abnormal_dict:
         user_dict = qstat_users()
-        print('\033[33m---------------------------------'
+        print('\033[33m------------------------------------'
               '----------------------------------\033[0m')
         explain_dict = qstat_explain(abnormal_dict)
         for queue_host in abnormal_dict:
             for exp in explain_dict[queue_host]:
-                print('\033[41;37m{0:15}{1:52}\033[0m'.format(
-                        '@'.join(queue_host), exp))
-                print('\033[41;37m{0:15}{1:52}\033[0m'.format(
+                print('\033[41;37m{0:16}{1:54}\033[0m'.format(
+                        '['+'@'.join(queue_host)+']', exp))
+                print('\033[41;37m{0:16}{1:54}\033[0m'.format(
                         '', 'affected:'+','.join(
                             {user for user in user_dict['@'.join(queue_host)]})))
-    print('\033[33m----------------------------------'
+    print('\033[33m-------------------------------------'
           '---------------------------------\033[0m')
     print('\033[33m{0:10}\033[0m\033[32m{1:8}\033[0m'
           '\033[36m{2:8}\033[0m\033[35m{3:8}\033[0m'
