@@ -12,8 +12,8 @@
 \033[43;32m . Author  : Xiaofei Zeng                        \033[0m
 \033[43;32m . Email   : zengxiaofei@frasergen.com           \033[0m
 \033[43;32m             xiaofei_zeng@whu.edu.cn             \033[0m
-\033[43;32m . Version : 2.03                                \033[0m
-\033[43;32m . Update  : 2018.5.2                            \033[0m
+\033[43;32m . Version : 2.05                                \033[0m
+\033[43;32m . Update  : 2018.8.14                           \033[0m
 """
 
 from __future__ import print_function
@@ -23,7 +23,7 @@ import collections
 import re
 import argparse
 import random
-
+import getpass
 
 def qconf_se(host_name):
     for line in os.popen('qconf -se {0}'.format(host_name)):
@@ -60,7 +60,10 @@ def qstat_F():
         elif ':num_proc=' in ls:
             num_proc = int(line.split(':num_proc=')[-1])
         elif ':virtual_free' in ls:
-            if ls.endswith('M'):
+            if ls.endswith('K'):
+                swap_used = float(
+                        ls.split(':virtual_free=')[-1].rstrip('K'))/(1024**2)
+            elif ls.endswith('M'):
                 virtual_free = float(
                         ls.split(':virtual_free=')[-1].rstrip('M'))/1024
             elif ls.endswith('G'):
@@ -70,7 +73,10 @@ def qstat_F():
                 virtual_free = float(ls.split(':virtual_free=')[-1])
                 assert virtual_free == 0
         elif ':swap_used' in ls:
-            if ls.endswith('M'):
+            if ls.endswith('K'):
+                swap_used = float(
+                        ls.split(':swap_used=')[-1].rstrip('K'))/(1024**2)
+            elif ls.endswith('M'):
                 swap_used = float(
                         ls.split(':swap_used=')[-1].rstrip('M'))/1024
             elif ls.endswith('G'):
@@ -120,12 +126,11 @@ def qstat_users():
     return user_dict
 
 def log(log_file):
-    whoami = os.popen('whoami').read().strip()
-    if whoami != 'zengxiaofei':
-        date = os.popen('date "+%Y-%m-%d	%H:%M:%S"').read().strip()
-        hostname = os.popen('hostname').read()
-        with open(log_file, 'a') as flog:
-            flog.write('{0}\t{1}\t{2}'.format(whoami, date, hostname))
+    whoami = getpass.getuser()
+    date = os.popen('date "+%Y-%m-%d	%H:%M:%S"').read().strip()
+    hostname = os.popen('hostname').read()
+    with open(log_file, 'a') as flog:
+        flog.write('{0}\t{1}\t{2}'.format(whoami, date, hostname))
 
 
 def rank(log_file):
@@ -181,7 +186,7 @@ def main():
         if isinstance(stat_list[4], float):
             stat_list[4] = 100*stat_list[4]/int(nproc)
         stat_list.extend((nproc, vf))
-    print('\033[33m{0:16}{1:13}{2:9}{3:9}{4:8}{5:8}{6:5}\033[0m'.format(
+    print('\033[33m{0:16}{1:13}{2:9}{3:8}{4:9}{5:8}{6:5}\033[0m'.format(
             'Queue','VirtualFree','FreeCPU', 'NJOB', '%LOAD','SWAP', 'States'))
     print('\033[33m------------------------------------'
           '---------------------------------\033[0m')
@@ -226,8 +231,8 @@ def main():
         # partly used
         else:
             fcolor = '\033[36m'
-        print('{0}{1:16}{2:13}{3:9}{4:9}'
-                '{5:8}{6:8}{7:5}\033[0m'.format(
+        print('{0}{1:16}{2:13}{3:9}{4:8}'
+                '{5:9}{6:8}{7:6}\033[0m'.format(
                       fcolor, '@'.join(queue_host), vmem_stat, ncpu_stat, 
                       njob_stat, load_stat, swap_stat, stat_list[6]))
     if abnormal_dict:
@@ -236,19 +241,19 @@ def main():
               '----------------------------------\033[0m')
         explain_dict = qstat_explain(abnormal_dict)
         for queue_host in abnormal_dict:
+            print('\033[41;37m{0:69}\033[0m'.format('['+'@'.join(queue_host)+']'))
             for exp in explain_dict[queue_host]:
-                print('\033[41;37m{0:16}{1:54}\033[0m'.format(
-                        '['+'@'.join(queue_host)+']', exp))
-                print('\033[41;37m{0:16}{1:54}\033[0m'.format(
-                        '', 'affected:'+','.join(
-                            {user for user in user_dict['@'.join(queue_host)]})))
+                print('\033[41;37m{0:69}\033[0m'.format('    '+exp))
+            print('\033[41;37m{1:69}\033[0m'.format(
+                    '', '    affected:'+','.join(
+                        {user for user in user_dict['@'.join(queue_host)]})))
     print('\033[33m------------------------------------'
           '---------------------------------\033[0m')
     print('\033[33m{0:10}\033[0m\033[32m{1:8}\033[0m'
           '\033[36m{2:8}\033[0m\033[35m{3:8}\033[0m'
           '\033[41;37m{4}\033[0m'.format(
                   'Legend:','free','part','full', 'abnormal'))
-    log(log_file) 
+    log(log_file)
 
 
 if __name__ == '__main__':
